@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Supplier = require('../models/supplier.model.js');
-const { protect, managerOrAdmin } = require('../middlewares/auth.middleware');
+const { protect, managerOrAdmin } = require('../middlewares/auth.middleware.js');
 
 router.get('/', protect, async (req, res) => {
   try {
