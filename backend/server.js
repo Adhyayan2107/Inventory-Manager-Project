@@ -33,7 +33,7 @@ app.use((err, req, res, next) => {
 // MongoDB Connection
 async function connectDB() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
+    await mongoose.connect(process.env.MONGO_URI);
     console.log('MongoDB connected successfully');
   }
   catch (error) {
