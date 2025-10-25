@@ -32,8 +32,9 @@ export default function Register() {
     setLoading(true);
 
     const { confirmPassword, ...registerData } = formData;
+        navigate('/');
     const result = await register(registerData);
-    
+
     if (result.success) {
       navigate('/');
     } else {
