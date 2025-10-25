@@ -31,16 +31,21 @@ app.use((err, req, res, next) => {
 });
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB Connected'))
-  .catch(err => {
-    console.error('MongoDB Connection Error:', err);
+async function connectDB() {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('MongoDB connected successfully');
+  }
+  catch (error) {
+    console.error('MongoDB connection error:', error);
     process.exit(1);
-  });
+  }
+}
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, async() => {
+  await connectDB();
   console.log(`Server running on port ${PORT}`);
   console.log(`http://localhost:${PORT}`);
 });
