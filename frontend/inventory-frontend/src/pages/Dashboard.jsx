@@ -10,6 +10,8 @@ import { formatCurrency } from '../utils/formatters';
 export default function Dashboard() {
   const [productStats, setProductStats] = useState(null);
   const [orderStats, setOrderStats] = useState(null);
+  const [salesData, setSalesData] = useState([]);
+  const [categoryData, setCategoryData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,30 +24,26 @@ export default function Dashboard() {
         productApi.getStats(),
         orderApi.getStats()
       ]);
+      
       setProductStats(products.data);
       setOrderStats(orders.data);
+      
+      // Set sales/revenue trend data if provided by backend
+      if (orders.data.salesTrend) {
+        setSalesData(orders.data.salesTrend);
+      }
+      
+      // Set category distribution data if provided by backend
+      if (products.data.categoryDistribution) {
+        setCategoryData(products.data.categoryDistribution);
+      }
+      
     } catch (error) {
       console.error('Error loading stats:', error);
     } finally {
       setLoading(false);
     }
   };
-
-  const salesData = [
-    { name: 'Jan', sales: 4000, purchases: 2400 },
-    { name: 'Feb', sales: 3000, purchases: 1398 },
-    { name: 'Mar', sales: 2000, purchases: 9800 },
-    { name: 'Apr', sales: 2780, purchases: 3908 },
-    { name: 'May', sales: 1890, purchases: 4800 },
-    { name: 'Jun', sales: 2390, purchases: 3800 }
-  ];
-
-  const categoryData = [
-    { name: 'Electronics', value: 400 },
-    { name: 'Clothing', value: 300 },
-    { name: 'Food', value: 300 },
-    { name: 'Books', value: 200 }
-  ];
 
   const COLORS = ['#667eea', '#764ba2', '#f093fb', '#4facfe'];
 
@@ -107,32 +105,44 @@ export default function Dashboard() {
         {/* Sales vs Purchases Chart */}
         <div className="card">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Sales vs Purchases</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={salesData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="sales" fill="#667eea" />
-              <Bar dataKey="purchases" fill="#764ba2" />
-            </BarChart>
-          </ResponsiveContainer>
+          {salesData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={salesData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="sales" fill="#667eea" />
+                <Bar dataKey="purchases" fill="#764ba2" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[300px] text-gray-500">
+              No sales data available
+            </div>
+          )}
         </div>
 
         {/* Revenue Trend */}
         <div className="card">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Revenue Trend</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={salesData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="sales" stroke="#667eea" strokeWidth={3} />
-            </LineChart>
-          </ResponsiveContainer>
+          {salesData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={salesData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="sales" stroke="#667eea" strokeWidth={3} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[300px] text-gray-500">
+              No revenue data available
+            </div>
+          )}
         </div>
       </div>
 
@@ -141,25 +151,31 @@ export default function Dashboard() {
         {/* Product Distribution */}
         <div className="card lg:col-span-1">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Product Distribution</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={categoryData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {categoryData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {categoryData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={categoryData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {categoryData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-gray-500">
+              No category data available
+            </div>
+          )}
         </div>
 
         {/* Quick Stats */}

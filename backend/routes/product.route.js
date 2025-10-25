@@ -5,6 +5,71 @@ const User = require('../models/user.models.js');
 const { protect, managerOrAdmin } = require('../middlewares/auth.middleware.js');
 const { sendLowStockAlert } = require('../utils/emailService.js');
 
+// IMPORTANT: Stats route MUST come BEFORE /:id route
+router.get('/stats/overview', protect, async (req, res) => {
+  try {
+    const totalProducts = await Product.countDocuments();
+    const lowStockProducts = await Product.countDocuments({
+      $expr: { $lte: ['$quantity', '$minStockLevel'] }
+    });
+    const outOfStock = await Product.countDocuments({ quantity: 0 });
+    
+    // Calculate total inventory value
+    const totalValue = await Product.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $multiply: ['$quantity', '$price'] } }
+        }
+      }
+    ]);
+
+    // Category distribution for pie chart
+    const categoryDistribution = await Product.aggregate([
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$categoryInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $group: {
+          _id: '$categoryInfo.name',
+          value: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          name: { $ifNull: ['$_id', 'Uncategorized'] },
+          value: 1
+        }
+      }
+    ]);
+
+    res.json({
+      totalProducts,
+      lowStockProducts,
+      outOfStock,
+      totalInventoryValue: totalValue[0]?.total || 0,
+      categoryDistribution: categoryDistribution.length > 0 
+        ? categoryDistribution 
+        : [{ name: 'Uncategorized', value: totalProducts }]
+    });
+  } catch (error) {
+    console.error('Product stats error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/', protect, async (req, res) => {
   try {
     const { category, status, search, lowStock } = req.query;
@@ -146,33 +211,6 @@ router.delete('/:id', protect, managerOrAdmin, async (req, res) => {
     } else {
       res.status(404).json({ message: 'Product not found' });
     }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-router.get('/stats/overview', protect, async (req, res) => {
-  try {
-    const totalProducts = await Product.countDocuments();
-    const lowStockProducts = await Product.countDocuments({
-      $expr: { $lte: ['$quantity', '$minStockLevel'] }
-    });
-    const outOfStock = await Product.countDocuments({ quantity: 0 });
-    
-    const totalValue = await Product.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: { $sum: { $multiply: ['$quantity', '$price'] } }
-        }
-      }
-    ]);
-
-    res.json({
-      totalProducts,
-      lowStockProducts,
-      outOfStock,
-      totalInventoryValue: totalValue[0]?.total || 0
-    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

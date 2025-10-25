@@ -5,6 +5,79 @@ const Product = require('../models/product.model.js');
 const { protect, managerOrAdmin } = require('../middlewares/auth.middleware.js');
 const { sendOrderConfirmation } = require('../utils/emailService.js');
 
+// IMPORTANT: Stats route MUST come before /:id route
+router.get('/stats/overview', protect, async (req, res) => {
+  try {
+    const totalOrders = await Order.countDocuments();
+    const pendingOrders = await Order.countDocuments({ status: 'pending' });
+    const completedOrders = await Order.countDocuments({ status: 'completed' });
+    
+    const totalSales = await Order.aggregate([
+      { $match: { type: 'sale', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]);
+
+    const totalPurchases = await Order.aggregate([
+      { $match: { type: 'purchase', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]);
+
+    // Monthly sales trend (last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const salesTrend = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sixMonthsAgo },
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: {
+            month: { $month: '$createdAt' },
+            year: { $year: '$createdAt' },
+            type: '$type'
+          },
+          total: { $sum: '$totalAmount' }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
+
+    // Format sales trend data for charts
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const trendMap = {};
+    
+    salesTrend.forEach(item => {
+      const key = `${monthNames[item._id.month - 1]} ${item._id.year}`;
+      if (!trendMap[key]) {
+        trendMap[key] = { name: key, sales: 0, purchases: 0 };
+      }
+      if (item._id.type === 'sale') {
+        trendMap[key].sales = item.total;
+      } else if (item._id.type === 'purchase') {
+        trendMap[key].purchases = item.total;
+      }
+    });
+
+    const formattedSalesTrend = Object.values(trendMap);
+
+    res.json({
+      totalOrders,
+      pendingOrders,
+      completedOrders,
+      totalSalesAmount: totalSales[0]?.total || 0,
+      totalPurchasesAmount: totalPurchases[0]?.total || 0,
+      salesTrend: formattedSalesTrend
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/', protect, async (req, res) => {
   try {
     const { type, status, paymentStatus } = req.query;
@@ -57,9 +130,15 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
       notes
     } = req.body;
 
-    // Calculate totals
+    if (!items || items.length === 0) {
+      return res.status(400).json({ 
+        message: 'Please add at least one item to the order' 
+      });
+    }
+
     let subtotal = 0;
     const orderItems = [];
+    const productUpdates = [];
 
     for (const item of items) {
       const product = await Product.findById(item.product);
@@ -68,6 +147,14 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
         return res.status(404).json({ 
           message: `Product not found: ${item.product}` 
         });
+      }
+
+      if (type === 'sale') {
+        if (product.quantity < item.quantity) {
+          return res.status(400).json({ 
+            message: `Insufficient stock for ${product.name}. Available: ${product.quantity}, Requested: ${item.quantity}` 
+          });
+        }
       }
 
       const itemTotal = item.quantity * item.price;
@@ -79,6 +166,11 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
         price: item.price,
         total: itemTotal
       });
+
+      productUpdates.push({
+        product: product,
+        quantity: item.quantity
+      });
     }
 
     const totalAmount = subtotal + (tax || 0) - (discount || 0);
@@ -86,12 +178,9 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
     const orderCount = await Order.countDocuments();
     const orderNumber = `ORD-${Date.now()}-${orderCount + 1}`;
 
-    const order = new Order({
+    const orderData = {
       orderNumber,
       type,
-      supplier,
-      customerName,
-      customerEmail,
       items: orderItems,
       subtotal,
       tax: tax || 0,
@@ -99,25 +188,25 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
       totalAmount,
       notes,
       createdBy: req.user._id
-    });
+    };
 
+    if (type === 'purchase' && supplier) {
+      orderData.supplier = supplier;
+    } else if (type === 'sale') {
+      if (customerName) orderData.customerName = customerName;
+      if (customerEmail) orderData.customerEmail = customerEmail;
+    }
+
+    const order = new Order(orderData);
     const createdOrder = await order.save();
 
-    for (const item of orderItems) {
-      const product = await Product.findById(item.product);
-      
+    for (const update of productUpdates) {
       if (type === 'purchase') {
-        product.quantity += item.quantity;
+        update.product.quantity += update.quantity;
       } else if (type === 'sale') {
-        if (product.quantity < item.quantity) {
-          return res.status(400).json({ 
-            message: `Insufficient stock for ${product.name}` 
-          });
-        }
-        product.quantity -= item.quantity;
+        update.product.quantity -= update.quantity;
       }
-      
-      await product.save();
+      await update.product.save();
     }
 
     const emailTo = type === 'sale' ? customerEmail : req.user.email;
@@ -138,6 +227,7 @@ router.post('/', protect, managerOrAdmin, async (req, res) => {
 
     res.status(201).json(populatedOrder);
   } catch (error) {
+    console.error('Order creation error:', error);
     res.status(500).json({ message: error.message });
   }
 });
@@ -146,22 +236,22 @@ router.put('/:id', protect, managerOrAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      if (req.body.status) order.status = req.body.status;
-      if (req.body.paymentStatus) order.paymentStatus = req.body.paymentStatus;
-      if (req.body.notes) order.notes = req.body.notes;
-
-      const updatedOrder = await order.save();
-
-      const populatedOrder = await Order.findById(updatedOrder._id)
-        .populate('supplier', 'name email')
-        .populate('items.product', 'name sku')
-        .populate('createdBy', 'name');
-
-      res.json(populatedOrder);
-    } else {
-      res.status(404).json({ message: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
+
+    if (req.body.status) order.status = req.body.status;
+    if (req.body.paymentStatus) order.paymentStatus = req.body.paymentStatus;
+    if (req.body.notes !== undefined) order.notes = req.body.notes;
+
+    const updatedOrder = await order.save();
+
+    const populatedOrder = await Order.findById(updatedOrder._id)
+      .populate('supplier', 'name email')
+      .populate('items.product', 'name sku')
+      .populate('createdBy', 'name');
+
+    res.json(populatedOrder);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -171,53 +261,25 @@ router.delete('/:id', protect, managerOrAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      for (const item of order.items) {
-        const product = await Product.findById(item.product);
-        
-        if (product) {
-          if (order.type === 'purchase') {
-            product.quantity -= item.quantity;
-          } else if (order.type === 'sale') {
-            product.quantity += item.quantity;
-          }
-          await product.save();
-        }
-      }
-
-      await order.deleteOne();
-      res.json({ message: 'Order cancelled and inventory restored' });
-    } else {
-      res.status(404).json({ message: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
 
-router.get('/stats/overview', protect, async (req, res) => {
-  try {
-    const totalOrders = await Order.countDocuments();
-    const pendingOrders = await Order.countDocuments({ status: 'pending' });
-    const completedOrders = await Order.countDocuments({ status: 'completed' });
-    
-    const totalSales = await Order.aggregate([
-      { $match: { type: 'sale', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-    ]);
+    for (const item of order.items) {
+      const product = await Product.findById(item.product);
+      
+      if (product) {
+        if (order.type === 'purchase') {
+          product.quantity -= item.quantity;
+        } else if (order.type === 'sale') {
+          product.quantity += item.quantity;
+        }
+        await product.save();
+      }
+    }
 
-    const totalPurchases = await Order.aggregate([
-      { $match: { type: 'purchase', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-    ]);
-
-    res.json({
-      totalOrders,
-      pendingOrders,
-      completedOrders,
-      totalSalesAmount: totalSales[0]?.total || 0,
-      totalPurchasesAmount: totalPurchases[0]?.total || 0
-    });
+    await order.deleteOne();
+    res.json({ message: 'Order cancelled and inventory restored' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

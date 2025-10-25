@@ -16,7 +16,7 @@ import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
 import Orders from './pages/Orders';
 import OrderForm from './pages/OrderForm';
-// import Profile from './pages/Profile';
+import Profile from './pages/Profile';
 
 function App() {
   const { user, loading } = useAuth();
@@ -42,7 +42,7 @@ function App() {
                 <Route path="/suppliers" element={<ProtectedRoute><Suppliers /></ProtectedRoute>} />
                 <Route path="/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
                 <Route path="/orders/new" element={<ProtectedRoute><OrderForm /></ProtectedRoute>} />
-                {/* <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} /> */}
+                <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
                 <Route path="/login" element={<Navigate to="/" replace />} />
                 <Route path="/register" element={<Navigate to="/" replace />} />
               </Routes>
